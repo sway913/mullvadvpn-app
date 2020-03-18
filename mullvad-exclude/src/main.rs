@@ -4,13 +4,16 @@ use nix::unistd::{execvp, getgid, getpid, getuid, setgid, setuid};
 use std::{
     env,
     error::Error as StdError,
-    ffi::{CStr, CString, OsString},
-    fs, io,
+    ffi::{CStr, CString, NulError},
+    fs, io, iter,
     os::unix::ffi::OsStrExt,
 };
 
 #[cfg(target_os = "linux")]
 const CGROUP_PROCS_PATH: &str = "/sys/fs/cgroup/net_cls/mullvad-exclusions/cgroup.procs";
+
+#[cfg(target_os = "linux")]
+const PROGRAM_NAME: &str = "mullvad-exclude";
 
 #[cfg(target_os = "linux")]
 #[derive(err_derive::Error, Debug)]
@@ -22,14 +25,17 @@ enum Error {
     #[error(display = "Cannot set the cgroup")]
     AddProcToCGroup(#[error(source)] io::Error),
 
-    #[error(display = "Failed to drop root user privileges")]
+    #[error(display = "Failed to drop root user privileges for the process")]
     DropRootUid(#[error(source)] nix::Error),
 
-    #[error(display = "Failed to drop root group privileges")]
+    #[error(display = "Failed to drop root group privileges for the process")]
     DropRootGid(#[error(source)] nix::Error),
 
     #[error(display = "Failed to launch the process")]
     Exec(#[error(source)] nix::Error),
+
+    #[error(display = "An argument contains interior nul bytes")]
+    ArgumentNulError(#[error(source)] NulError),
 }
 
 fn main() {
@@ -37,7 +43,8 @@ fn main() {
     match run() {
         Err(Error::InvalidArguments) => {
             let mut args = env::args();
-            eprintln!("Usage: {} <command> [args]", args.next().unwrap());
+            let program = args.next().unwrap_or(PROGRAM_NAME.to_string());
+            eprintln!("Usage {} COMMAND [ARGS]", program);
             std::process::exit(1);
         }
         Err(e) => {
@@ -58,16 +65,13 @@ fn main() {
 #[cfg(target_os = "linux")]
 fn run() -> Result<void::Void, Error> {
     let mut args_iter = env::args_os().skip(1);
-    let program: Option<OsString> = args_iter.next();
-    if program == None {
-        return Err(Error::InvalidArguments);
-    }
-    let program = CString::new(program.unwrap().as_bytes()).unwrap();
+    let program = args_iter.next().ok_or(Error::InvalidArguments)?;
+    let program = CString::new(program.as_bytes()).map_err(Error::ArgumentNulError)?;
 
-    let args_iter = env::args_os().skip(1);
-    let args: Vec<CString> = args_iter
-        .map(|arg| CString::new(arg.as_bytes()).unwrap())
-        .collect();
+    let args: Vec<CString> = iter::once(Ok(program.clone()))
+        .chain(args_iter.map(|arg| CString::new(arg.as_bytes())))
+        .collect::<Result<Vec<CString>, NulError>>()
+        .map_err(Error::ArgumentNulError)?;
     let args: Vec<&CStr> = args.iter().map(|arg| &**arg).collect();
 
     // Set the cgroup of this process
