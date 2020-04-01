@@ -7,6 +7,9 @@ pub mod android;
 pub mod net;
 pub mod tunnel;
 
+#[cfg(target_os = "linux")]
+pub const SPLIT_TUNNEL_CGROUP_NAME: &str = "mullvad-exclusions";
+
 
 pub trait ErrorExt {
     /// Creates a string representation of the entire error chain.
