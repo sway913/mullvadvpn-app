@@ -15,11 +15,11 @@ private let kServiceName = "Mullvad VPN"
 enum TunnelConfigurationManagerError: Error {
     case encode(TunnelConfigurationCoder.Error)
     case decode(TunnelConfigurationCoder.Error)
-    case addToKeychain(KeychainError)
-    case updateKeychain(KeychainError)
-    case removeKeychainItem(KeychainError)
-    case getFromKeychain(KeychainError)
-    case getPersistentKeychainRef(KeychainError)
+    case addToKeychain(Keychain.Error)
+    case updateKeychain(Keychain.Error)
+    case removeKeychainItem(Keychain.Error)
+    case getFromKeychain(Keychain.Error)
+    case getPersistentKeychainRef(Keychain.Error)
 }
 
 enum TunnelConfigurationManager {}
@@ -30,10 +30,10 @@ extension TunnelConfigurationManager {
         TunnelConfigurationCoder.encode(tunnelConfig: configuration)
             .mapError { .encode($0) }
             .flatMap { (data) -> Result<(), TunnelConfigurationManagerError> in
-                Keychain.updateItem(account: account, data: data)
+                KeychainHelper.updateItem(account: account, data: data)
                     .flatMapError { (keychainError) -> Result<(), TunnelConfigurationManagerError> in
                         if case .itemNotFound = keychainError {
-                            return Keychain.addItem(account: account, data: data)
+                            return KeychainHelper.addItem(account: account, data: data)
                                 .mapError { .addToKeychain($0) }
                         } else {
                             return .failure(.updateKeychain(keychainError))
@@ -43,7 +43,7 @@ extension TunnelConfigurationManager {
     }
 
     static func load(account: String) -> Result<TunnelConfiguration, TunnelConfigurationManagerError> {
-        Keychain.getItemData(account: account)
+        KeychainHelper.getItemData(account: account)
             .mapError { .getFromKeychain($0) }
             .flatMap { (data) in
                 TunnelConfigurationCoder.decode(data: data)
@@ -52,7 +52,7 @@ extension TunnelConfigurationManager {
     }
 
     static func load(persistentKeychainRef: Data) -> Result<TunnelConfiguration, TunnelConfigurationManagerError> {
-        Keychain.getItemData(persistentKeychainRef: persistentKeychainRef)
+        KeychainHelper.getItemData(persistentKeychainRef: persistentKeychainRef)
             .mapError { .getFromKeychain($0) }
             .flatMap { (data) in
                 TunnelConfigurationCoder.decode(data: data)
@@ -61,154 +61,94 @@ extension TunnelConfigurationManager {
     }
 
     static func remove(account: String) -> Result<(), TunnelConfigurationManagerError> {
-        Keychain.removeItem(account: account)
+        KeychainHelper.removeItem(account: account)
             .mapError { .removeKeychainItem($0) }
     }
 
     static func getPersistentKeychainRef(account: String) -> Result<Data, TunnelConfigurationManagerError> {
-        Keychain.getPersistentRef(account: account)
+        KeychainHelper.getPersistentRef(account: account)
             .mapError { .getPersistentKeychainRef($0) }
     }
 
 }
 
-private enum Keychain {}
+private enum KeychainHelper {}
 
-private extension Keychain {
-
-    /// A Keychain Result type
-    typealias Result<T> = Swift.Result<T, KeychainError>
-
-    /// List all of the account tokens in Keychain
-    static func listAccounts() -> Result<[String]> {
-        let query: [CFString: Any] = [
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrService: kServiceName,
-            kSecReturnAttributes: true,
-            kSecMatchLimit: kSecMatchLimitAll,
-        ]
-
-        return executeSecCopyMatching(query: query)
-            .map { (result) in
-                let attrs = result as! [[CFString: Any]]
-                let accountTokens = attrs.compactMap { (dict) in
-                    dict[kSecAttrAccount] as? String
-                }
-
-                return accountTokens
-        }
-    }
+private extension KeychainHelper {
 
     /// Get a persistent reference to the Keychain item for the given account token
-    static func getPersistentRef(account: String) -> Result<Data> {
-        let query: [CFString: Any] = [
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrAccount: account,
-            kSecAttrService: kServiceName,
-            kSecReturnPersistentRef: true
-        ]
+    static func getPersistentRef(account: String) -> Keychain.Result<Data> {
+        var query = Keychain.Attributes()
+        query.class = .genericPassword
+        query.account = account
+        query.service = kServiceName
+        query.return = [.persistentReference]
 
-        return executeSecCopyMatching(query: query)
-            .map { $0 as! Data }
+        return Keychain.findFirst(query: query).map { (attributes) -> Data in
+            return attributes!.valueData!
+        }
     }
 
     /// Get data associated with the given persistent Keychain reference
-    static func getItemData(persistentKeychainRef: Data) -> Result<Data> {
-        let query: [CFString: Any] = [
-            kSecClass: kSecClassGenericPassword,
-            kSecValuePersistentRef: persistentKeychainRef,
-            kSecReturnData: true
-        ]
+    static func getItemData(persistentKeychainRef: Data) -> Keychain.Result<Data> {
+        var query = Keychain.Attributes()
+        query.class = .genericPassword
+        query.valuePersistentReference = persistentKeychainRef
+        query.return = [.data]
 
-        return executeSecCopyMatching(query: query)
-            .map { $0 as! Data }
+        return Keychain.findFirst(query: query).map { (attributes) -> Data in
+            return attributes!.valueData!
+        }
     }
 
     /// Get data associated with the given account token
-    static func getItemData(account: String) -> Result<Data> {
-        let query: [CFString: Any] = [
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrAccount: account,
-            kSecAttrService: kServiceName,
-            kSecReturnData: true
-        ]
+    static func getItemData(account: String) -> Keychain.Result<Data> {
+        var query = Keychain.Attributes()
+        query.class = .genericPassword
+        query.account = account
+        query.service = kServiceName
+        query.return = [.data]
 
-        return executeSecCopyMatching(query: query)
-            .map { $0 as! Data }
+        return Keychain.findFirst(query: query).map { (attribute) -> Data in
+            return attribute!.valueData!
+        }
     }
 
     /// Store data in the Keychain and associate it with the given account token
-    static func addItem(account: String, data: Data) -> Result<()> {
-        let attributes: [CFString: Any] = [
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrAccount: account,
-            kSecAttrService: kServiceName,
-            kSecValueData: data,
-            kSecReturnData: false,
+    static func addItem(account: String, data: Data) -> Keychain.Result<()> {
+        var attributes = Keychain.Attributes()
+        attributes.class = .genericPassword
+        attributes.valueData = data
+        attributes.account = account
+        attributes.service = kServiceName
+        // Share the item with the application group
+        attributes.accessGroup = ApplicationConfiguration.securityGroupIdentifier
 
-            // Share the item with the application group
-            kSecAttrAccessGroup: ApplicationConfiguration.securityGroupIdentifier,
-        ]
-
-        let status = SecItemAdd(attributes as CFDictionary, nil)
-
-        return mapSecResult(status: status) {
-            ()
-        }
+        return Keychain.add(attributes)
+            .map { _ in () }
     }
 
     /// Replace the data associated with the given account token.
-    static func updateItem(account: String, data: Data) -> Result<()> {
-        let query: [CFString: Any] = [
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrAccount: account,
-            kSecAttrService: kServiceName,
-        ]
+    static func updateItem(account: String, data: Data) -> Keychain.Result<()> {
+        var query = Keychain.Attributes()
+        query.class = .genericPassword
+        query.account = account
+        query.service = kServiceName
 
-        let update: [CFString: Any] = [
-            kSecValueData: data
-        ]
+        var update = Keychain.Attributes()
+        update.valueData = data
 
-        let status = SecItemUpdate(query as CFDictionary, update as CFDictionary)
-
-        return mapSecResult(status: status) {
-            ()
-        }
+        return Keychain.update(query: query, update: update)
     }
 
     /// Remove the data associated with the given account token
-    static func removeItem(account: String) -> Result<()> {
-        let query: [CFString: Any] = [
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrAccount: account,
-            kSecAttrService: kServiceName,
-        ]
+    static func removeItem(account: String) -> Keychain.Result<()> {
+        var query = Keychain.Attributes()
+        query.class = .genericPassword
+        query.account = account
+        query.service = kServiceName
 
-        let status = SecItemDelete(query as CFDictionary)
-
-        return mapSecResult(status: status) {
-            ()
-        }
-    }
-
-    /// A private helper that verifies the given `status` and executes `body` on success
-    static private func mapSecResult<T>(status: OSStatus, body: () -> T) -> Result<T> {
-        if status == errSecSuccess {
-            return .success(body())
-        } else {
-            return .failure(KeychainError(code: status))
-        }
-    }
-
-    /// A private helper to execute the given query using `SecCopyMatching` and map the result to
-    /// the `Result<CFTypeRef?>` type.
-    static private func executeSecCopyMatching(query: [CFString: Any]) -> Result<CFTypeRef?> {
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-
-        return mapSecResult(status: status) {
-            result
-        }
+        return Keychain.delete(query: query)
     }
 
 }
