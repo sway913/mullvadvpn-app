@@ -6,7 +6,6 @@ use std::{
     net::{AddrParseError, IpAddr},
     path::Path,
     process::Command,
-    str::FromStr,
 };
 use talpid_types::SPLIT_TUNNEL_CGROUP_NAME;
 
@@ -20,6 +19,8 @@ pub const NETCLS_CLASSID: u32 = 0x4d9f41;
 pub const MARK: i32 = 0xf41;
 
 const ROUTING_TABLE_NAME: &str = "mullvad_exclusions";
+/// An arbitrary ID used to identify the exclusions routing table.
+pub const ROUTING_TABLE_ID: u8 = 137;
 const RT_TABLES_PATH: &str = "/etc/iproute2/rt_tables";
 
 /// Errors related to split tunneling.
@@ -29,10 +30,6 @@ pub enum Error {
     /// Unable to list routing table entries.
     #[error(display = "Failed to enumerate routes")]
     EnumerateRoutes(#[error(source)] io::Error),
-
-    /// Unable to find the interface/ip pair used by the physical interface.
-    #[error(display = "No default route found")]
-    NoDefaultRoute,
 
     /// Failed to parse string containing an IP address. May be invalid.
     #[error(display = "Failed to parse IP address")]
@@ -45,6 +42,10 @@ pub enum Error {
     /// ip command returned an error status.
     #[error(display = "ip command failed")]
     IpFailed,
+
+    /// The ID is already in use.
+    #[error(display = "Unable to create routing table since the ID exists")]
+    RoutingTableIdInUse,
 
     /// Unable to create routing table for tagged connections and packets.
     #[error(display = "Unable to create routing table")]
@@ -79,53 +80,19 @@ pub enum Error {
     SetDns(#[error(source)] io::Error),
 }
 
-struct DefaultRoute {
-    interface: String,
-    address: IpAddr,
-}
-
-/// Obtain the IP/interface of the physical interface
-fn get_default_route() -> Result<DefaultRoute, Error> {
-    // FIXME: use netlink
-    let mut cmd = Command::new("ip");
-    cmd.args(&["-4", "route", "list", "table", "main"]);
-    log::trace!("running cmd - {:?}", &cmd);
-    let out = cmd.output().map_err(Error::EnumerateRoutes)?;
-    let out_str = String::from_utf8_lossy(&out.stdout);
-
-    // Find "default" row
-    let expression = Regex::new(r"^default via ([0-9.]+) dev (\w+)").unwrap();
-
-    for line in out_str.lines() {
-        if let Some(captures) = expression.captures(&line) {
-            let ip_str = captures.get(1).unwrap().as_str();
-            let interface = captures.get(2).unwrap().as_str().to_string();
-
-            return Ok(DefaultRoute {
-                interface,
-                address: IpAddr::from_str(ip_str).map_err(Error::ParseIpError)?,
-            });
-        }
-    }
-
-    Err(Error::NoDefaultRoute)
-}
-
 /// Manage routing for split tunneling cgroup.
-pub struct SplitTunnel {
-    table_id: i32,
-}
+pub struct SplitTunnel;
 
 impl SplitTunnel {
     /// Object that allows specified applications to not pass through the tunnel
     pub fn new() -> Result<SplitTunnel, Error> {
-        let mut tunnel = SplitTunnel { table_id: 0 };
+        let tunnel = SplitTunnel;
         tunnel.initialize_routing_table()?;
         Ok(tunnel)
     }
 
     /// Set up policy-based routing for marked packets.
-    fn initialize_routing_table(&mut self) -> Result<(), Error> {
+    fn initialize_routing_table(&self) -> Result<(), Error> {
         // Add routing table to /etc/iproute2/rt_tables, if it does not exist
 
         let file = fs::OpenOptions::new()
@@ -134,8 +101,6 @@ impl SplitTunnel {
             .map_err(Error::RoutingTableSetup)?;
         let buf_reader = BufReader::new(file);
         let expression = Regex::new(r"^\s*(\d+)\s+(\w+)").unwrap();
-
-        let mut used_ids = Vec::<i32>::new();
 
         for line in buf_reader.lines() {
             let line = line.map_err(Error::RoutingTableSetup)?;
@@ -146,24 +111,15 @@ impl SplitTunnel {
                     .as_str()
                     .parse::<i32>()
                     .expect("Table ID does not fit i32");
-                let table_name = captures.get(2).unwrap().as_str();
 
-                if table_name == ROUTING_TABLE_NAME {
-                    // The table has already been added
-                    self.table_id = table_id;
+                if table_id == ROUTING_TABLE_ID as i32 {
+                    let table_name = captures.get(2).unwrap().as_str();
+                    if table_name != ROUTING_TABLE_NAME {
+                        // Some other table is using this ID.
+                        return Err(Error::RoutingTableIdInUse);
+                    }
                     return Ok(());
                 }
-
-                used_ids.push(table_id);
-            }
-        }
-
-        used_ids.sort_unstable();
-        for id in 1..256 {
-            if used_ids.binary_search(&id).is_err() {
-                // Assign a free id to the table
-                self.table_id = id;
-                break;
             }
         }
 
@@ -182,27 +138,13 @@ impl SplitTunnel {
             }
         }
 
-        writeln!(file, "{} {}", self.table_id, ROUTING_TABLE_NAME).map_err(Error::RoutingTableSetup)
+        writeln!(file, "{} {}", ROUTING_TABLE_ID, ROUTING_TABLE_NAME)
+            .map_err(Error::RoutingTableSetup)
     }
 
     /// Reset the split-tunneling routing table to its default state
     fn reset_table() -> Result<(), Error> {
-        let _ = exec_ip(&["-4", "route", "flush", "table", ROUTING_TABLE_NAME]);
-
-        // Force routing through the physical interface
-        let default_route = get_default_route()?;
-        exec_ip(&[
-            "-4",
-            "route",
-            "add",
-            "default",
-            "via",
-            &default_route.address.to_string(),
-            "dev",
-            &default_route.interface,
-            "table",
-            ROUTING_TABLE_NAME,
-        ])
+        exec_ip(&["-4", "route", "flush", "table", ROUTING_TABLE_NAME])
     }
 
     /// Route PID-associated packets through the physical interface.

@@ -36,6 +36,7 @@ pub enum Error {
 /// RouteManager applies a set of routes to the route table.
 /// If a destination has to be routed through the default node,
 /// the route will be adjusted dynamically when the default route changes.
+#[derive(Debug)]
 pub struct RouteManager {
     tx: Option<oneshot::Sender<oneshot::Sender<()>>>,
 }

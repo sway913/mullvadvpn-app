@@ -1,10 +1,13 @@
-use crate::routing::{NetNode, Node, RequiredRoute, Route};
+use crate::{
+    routing::{NetNode, Node, RequiredRoute, Route},
+    split,
+};
 
 use ipnetwork::IpNetwork;
 use std::{
     collections::{BTreeMap, HashSet},
     io,
-    net::IpAddr,
+    net::{IpAddr, Ipv4Addr},
 };
 
 use futures01::sync::oneshot as old_oneshot;
@@ -158,6 +161,13 @@ impl RouteManagerImplInner {
                 }
             }
         }
+
+        // Add split tunneling route
+        required_default_routes.insert(RequiredDefaultRoute {
+            table_id: split::ROUTING_TABLE_ID,
+            destination: ipnetwork::IpNetwork::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 0)
+                .unwrap(),
+        });
 
 
         let mut monitor = Self {
@@ -607,7 +617,7 @@ impl RouteManagerImplInner {
                     .destination_prefix(v4_prefix.ip(), v4_prefix.prefix())
                     .table(route.table_id);
 
-                if v4_prefix.prefix() != 32 {
+                if v4_prefix.prefix() != 0 && v4_prefix.prefix() != 32 {
                     add_message = add_message.scope(RT_SCOPE_LINK);
                 }
 
@@ -632,7 +642,7 @@ impl RouteManagerImplInner {
                     .destination_prefix(v6_prefix.ip(), v6_prefix.prefix())
                     .table(route.table_id);
 
-                if v6_prefix.prefix() != 128 {
+                if v6_prefix.prefix() != 0 && v6_prefix.prefix() != 128 {
                     add_message = add_message.scope(RT_SCOPE_LINK);
                 }
 

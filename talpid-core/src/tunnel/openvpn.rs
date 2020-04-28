@@ -1,4 +1,6 @@
 use super::TunnelEvent;
+#[cfg(target_os = "linux")]
+use crate::routing;
 use crate::{
     mktemp,
     process::{
@@ -7,6 +9,8 @@ use crate::{
     },
     proxy::{self, ProxyMonitor, ProxyResourceData},
 };
+#[cfg(target_os = "linux")]
+use std::collections::HashSet;
 use std::{
     collections::HashMap,
     fs,
@@ -72,6 +76,10 @@ pub enum Error {
     #[error(display = "No OpenVPN plugin found at {}", _0)]
     PluginNotFound(String),
 
+    /// Failed to set up routing.
+    #[error(display = "Failed to setup routing")]
+    SetupRoutingError(#[error(source)] crate::routing::Error),
+
     /// Error while writing credentials to temporary file.
     #[error(display = "Error while writing credentials to temporary file")]
     CredentialsWriteError(#[error(source)] io::Error),
@@ -128,6 +136,8 @@ pub struct OpenVpnMonitor<C: OpenVpnBuilder = OpenVpnCommand> {
     _user_pass_file: mktemp::TempFile,
     /// Keep the 'TempFile' for the proxy user-pass file in the struct, so it's removed on drop.
     _proxy_auth_file: Option<mktemp::TempFile>,
+    #[cfg(target_os = "linux")]
+    route_manager: routing::RouteManager,
 }
 
 impl OpenVpnMonitor<OpenVpnCommand> {
@@ -232,6 +242,10 @@ impl<C: OpenVpnBuilder + 'static> OpenVpnMonitor<C> {
             .start()
             .map_err(|e| Error::ChildProcessError("Failed to start", e))?;
 
+        #[cfg(target_os = "linux")]
+        let route_manager =
+            routing::RouteManager::new(HashSet::new()).map_err(Error::SetupRoutingError)?;
+
         Ok(OpenVpnMonitor {
             child: Arc::new(child),
             proxy_monitor,
@@ -240,6 +254,8 @@ impl<C: OpenVpnBuilder + 'static> OpenVpnMonitor<C> {
             closed: Arc::new(AtomicBool::new(false)),
             _user_pass_file: user_pass_file,
             _proxy_auth_file: proxy_auth_file,
+            #[cfg(target_os = "linux")]
+            route_manager,
         })
     }
 
@@ -352,6 +368,10 @@ impl<C: OpenVpnBuilder + 'static> OpenVpnMonitor<C> {
 
         let result = rx.recv().expect("inner_wait_tunnel no result");
         let _ = rx.recv().expect("inner_wait_tunnel no second result");
+
+        #[cfg(target_os = "linux")]
+        self.route_manager.stop();
+
         result
     }
 
