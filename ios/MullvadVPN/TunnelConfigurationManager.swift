@@ -12,19 +12,19 @@ import Security
 /// Service name used for keychain items
 private let kServiceName = "Mullvad VPN"
 
-enum TunnelConfigurationManagerError: Error {
-    case encode(TunnelConfigurationCoder.Error)
-    case decode(TunnelConfigurationCoder.Error)
-    case addToKeychain(Keychain.Error)
-    case updateKeychain(Keychain.Error)
-    case removeKeychainItem(Keychain.Error)
-    case getFromKeychain(Keychain.Error)
-    case getPersistentKeychainRef(Keychain.Error)
-}
-
 enum TunnelConfigurationManager {}
 
 extension TunnelConfigurationManager {
+
+    enum Error: Swift.Error {
+        case encode(TunnelConfigurationCoder.Error)
+        case decode(TunnelConfigurationCoder.Error)
+        case addToKeychain(Keychain.Error)
+        case updateKeychain(Keychain.Error)
+        case removeKeychainItem(Keychain.Error)
+        case getFromKeychain(Keychain.Error)
+        case getPersistentKeychainRef(Keychain.Error)
+    }
 
     enum SearchTerm {
         case accountToken(String)
@@ -40,26 +40,26 @@ extension TunnelConfigurationManager {
         }
     }
 
-    static func modify(searchTerm: SearchTerm, using changeConfiguration: (inout TunnelConfiguration) -> Void) -> Result<(), TunnelConfigurationManagerError> {
+    static func modify(searchTerm: SearchTerm, using changeConfiguration: (inout TunnelConfiguration) -> Void) -> Result<(), TunnelConfigurationManager.Error> {
         var searchQuery = makeKeychainAttributes()
         searchQuery.return = [.attributes, .data]
         searchTerm.apply(to: &searchQuery)
 
         while true {
             let result = Keychain.findFirst(query: searchQuery)
-                .mapError { TunnelConfigurationManagerError.getFromKeychain($0) }
-                .flatMap { (itemAttributes) -> Result<(), TunnelConfigurationManagerError> in
+                .mapError { TunnelConfigurationManager.Error.getFromKeychain($0) }
+                .flatMap { (itemAttributes) -> Result<(), TunnelConfigurationManager.Error> in
                     let itemAttributes = itemAttributes!
                     let serializedData = itemAttributes.valueData!
                     let modificationDate = itemAttributes.modificationDate!
 
                     return Self.decode(data: serializedData)
-                        .flatMap { (tunnelConfig) -> Result<(), TunnelConfigurationManagerError> in
+                        .flatMap { (tunnelConfig) -> Result<(), TunnelConfigurationManager.Error> in
                             var tunnelConfig = tunnelConfig
                             changeConfiguration(&tunnelConfig)
 
                             return Self.encode(tunnelConfig: tunnelConfig)
-                                .flatMap { (newData) -> Result<(), TunnelConfigurationManagerError> in
+                                .flatMap { (newData) -> Result<(), TunnelConfigurationManager.Error> in
                                     var searchQuery = Keychain.Attributes()
                                     searchQuery.class = .genericPassword
                                     searchQuery.service = kServiceName
@@ -73,7 +73,7 @@ extension TunnelConfigurationManager {
                                     updateAttributes.valueData = newData
 
                                     return Keychain.update(query: searchQuery, update: updateAttributes)
-                                        .mapError { TunnelConfigurationManagerError.updateKeychain($0) }
+                                        .mapError { TunnelConfigurationManager.Error.updateKeychain($0) }
                             }
                         }
             }
@@ -86,7 +86,7 @@ extension TunnelConfigurationManager {
         }
     }
 
-    static func load(searchTerm: SearchTerm) -> Result<TunnelConfiguration, TunnelConfigurationManagerError> {
+    static func load(searchTerm: SearchTerm) -> Result<TunnelConfiguration, TunnelConfigurationManager.Error> {
         var query = makeKeychainAttributes()
         query.return = [.data]
         searchTerm.apply(to: &query)
@@ -98,9 +98,9 @@ extension TunnelConfigurationManager {
         }
     }
 
-    static func add(configuration: TunnelConfiguration, account: String) -> Result<(), TunnelConfigurationManagerError> {
+    static func add(configuration: TunnelConfiguration, account: String) -> Result<(), TunnelConfigurationManager.Error> {
         Self.encode(tunnelConfig: configuration)
-            .flatMap { (data) -> Result<(), TunnelConfigurationManagerError> in
+            .flatMap { (data) -> Result<(), TunnelConfigurationManager.Error> in
                 var attributes = makeKeychainAttributes()
                 attributes.account = account
                 attributes.valueData = data
@@ -113,7 +113,7 @@ extension TunnelConfigurationManager {
         }
     }
 
-    static func remove(searchTerm: SearchTerm) -> Result<(), TunnelConfigurationManagerError> {
+    static func remove(searchTerm: SearchTerm) -> Result<(), TunnelConfigurationManager.Error> {
         var query = makeKeychainAttributes()
         searchTerm.apply(to: &query)
 
@@ -122,7 +122,7 @@ extension TunnelConfigurationManager {
     }
 
     /// Get a persistent reference to the Keychain item for the given account token
-    static func getPersistentKeychainRef(account: String) -> Result<Data, TunnelConfigurationManagerError> {
+    static func getPersistentKeychainRef(account: String) -> Result<Data, TunnelConfigurationManager.Error> {
         var query = makeKeychainAttributes()
         query.account = account
         query.return = [.persistentReference]
@@ -142,13 +142,13 @@ extension TunnelConfigurationManager {
         return attributes
     }
 
-    private static func encode(tunnelConfig: TunnelConfiguration) -> Result<Data, TunnelConfigurationManagerError> {
+    private static func encode(tunnelConfig: TunnelConfiguration) -> Result<Data, TunnelConfigurationManager.Error> {
         TunnelConfigurationCoder.encode(tunnelConfig: tunnelConfig)
-            .mapError { TunnelConfigurationManagerError.encode($0) }
+            .mapError { TunnelConfigurationManager.Error.encode($0) }
     }
 
-    private static func decode(data: Data) -> Result<TunnelConfiguration, TunnelConfigurationManagerError> {
+    private static func decode(data: Data) -> Result<TunnelConfiguration, TunnelConfigurationManager.Error> {
         TunnelConfigurationCoder.decode(data: data)
-            .mapError { TunnelConfigurationManagerError.decode($0) }
+            .mapError { TunnelConfigurationManager.Error.decode($0) }
     }
 }

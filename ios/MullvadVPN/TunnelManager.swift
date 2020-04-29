@@ -32,13 +32,13 @@ enum TunnelManagerError: Error {
     case unsetAccount(UnsetAccountError)
 
     /// A failure to set the relay constraints
-    case setRelayConstraints(TunnelConfigurationManagerError)
+    case setRelayConstraints(TunnelConfigurationManager.Error)
 
     /// A failure to get the relay constraints
-    case getRelayConstraints(TunnelConfigurationManagerError)
+    case getRelayConstraints(TunnelConfigurationManager.Error)
 
     /// A failure to get a public key used for Wireguard
-    case getWireguardPublicKey(TunnelConfigurationManagerError)
+    case getWireguardPublicKey(TunnelConfigurationManager.Error)
 
     /// A failure to re-generate a private key used for Wireguard
     case regenerateWireguardPrivateKey(RegenerateWireguardPrivateKeyError)
@@ -127,10 +127,10 @@ enum TunnelIpcRequestError: Error {
 
 enum SetAccountError: Error {
     /// A failure to make the tunnel configuration
-    case makeTunnelConfiguration(TunnelConfigurationManagerError)
+    case makeTunnelConfiguration(TunnelConfigurationManager.Error)
 
     /// A failure to update the tunnel configuration
-    case updateTunnelConfiguration(TunnelConfigurationManagerError)
+    case updateTunnelConfiguration(TunnelConfigurationManager.Error)
 
     /// A failure to push the wireguard key
     case pushWireguardKey(PushWireguardKeyError)
@@ -144,18 +144,18 @@ enum UnsetAccountError: Error {
     case removeTunnel(Error)
 
     /// A failure to remove a tunnel configuration from Keychain
-    case removeTunnelConfiguration(TunnelConfigurationManagerError)
+    case removeTunnelConfiguration(TunnelConfigurationManager.Error)
 }
 
 enum RegenerateWireguardPrivateKeyError: Error {
     /// A failure to read the public Wireguard key from Keychain
-    case readPublicWireguardKey(TunnelConfigurationManagerError)
+    case readPublicWireguardKey(TunnelConfigurationManager.Error)
 
     /// A failure to replace the public Wireguard key
     case replaceWireguardKey(PushWireguardKeyError)
 
     /// A failure to update tunnel configuration
-    case updateTunnelConfiguration(TunnelConfigurationManagerError)
+    case updateTunnelConfiguration(TunnelConfigurationManager.Error)
 
     /// A failure to set up a tunnel
     case setupTunnel(SetupTunnelError)
@@ -185,7 +185,7 @@ enum SetupTunnelError: Error {
     case reloadTunnel(Error)
 
     /// Unable to obtain the keychain reference for the configuration
-    case obtainKeychainRef(TunnelConfigurationManagerError)
+    case obtainKeychainRef(TunnelConfigurationManager.Error)
 }
 
 enum LoadTunnelError: Error {
@@ -610,8 +610,9 @@ class TunnelManager {
                 .setFailureType(to: TunnelManagerError.self)
                 .replaceNil(with: .missingAccount)
                 .flatMap { (accountToken) in
-                    TunnelConfigurationManager.modify(searchTerm: .accountToken(accountToken)) { (tunnelConfig) in
-                        tunnelConfig.relayConstraints = constraints
+                    TunnelConfigurationManager
+                        .modify(searchTerm: .accountToken(accountToken)) { (tunnelConfig) in
+                            tunnelConfig.relayConstraints = constraints
                     }.mapError { TunnelManagerError.setRelayConstraints($0) }
                         .publisher
                         .flatMap {
@@ -637,7 +638,7 @@ class TunnelManager {
                 .flatMap { (accountToken) in
                     TunnelConfigurationManager.load(searchTerm: .accountToken(accountToken))
                         .map { $0.relayConstraints }
-                        .flatMapError { (error) -> Result<RelayConstraints, TunnelConfigurationManagerError> in
+                        .flatMapError { (error) -> Result<RelayConstraints, TunnelConfigurationManager.Error> in
                             // Return default constraints if the config is not found in Keychain
                             if case .getFromKeychain(.itemNotFound) = error {
                                 return .success(TunnelConfiguration().relayConstraints)
@@ -775,13 +776,13 @@ class TunnelManager {
     }
 
     /// Retrieve the existing TunnelConfiguration or create a new one
-    private func makeTunnelConfiguration(accountToken: String) -> Result<TunnelConfiguration, TunnelConfigurationManagerError> {
+    private func makeTunnelConfiguration(accountToken: String) -> Result<TunnelConfiguration, TunnelConfigurationManager.Error> {
         TunnelConfigurationManager.load(searchTerm: .accountToken(accountToken))
-            .flatMapError { (error) -> Result<TunnelConfiguration, TunnelConfigurationManagerError> in
+            .flatMapError { (error) -> Result<TunnelConfiguration, TunnelConfigurationManager.Error> in
                 // Return default tunnel configuration if the config is not found in Keychain
                 if case .getFromKeychain(.itemNotFound) = error {
                     let defaultConfiguration = TunnelConfiguration()
-                    
+
                     return TunnelConfigurationManager
                         .add(configuration: TunnelConfiguration(), account: accountToken)
                         .map { defaultConfiguration }
@@ -850,7 +851,7 @@ class TunnelManager {
         return protocolConfig
     }
 
-    private func updateAssociatedAddresses(accountToken: String, addresses: WireguardAssociatedAddresses) -> Result<(), TunnelConfigurationManagerError> {
+    private func updateAssociatedAddresses(accountToken: String, addresses: WireguardAssociatedAddresses) -> Result<(), TunnelConfigurationManager.Error> {
         TunnelConfigurationManager.modify(searchTerm: .accountToken(accountToken)) { (tunnelConfig) in
             tunnelConfig.interface.addresses = [
                 addresses.ipv4Address,

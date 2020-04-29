@@ -23,7 +23,7 @@ enum PacketTunnelProviderError: Error {
     case missingKeychainConfigurationReference
 
     /// Failure to read the tunnel configuration from Keychain
-    case cannotReadTunnelConfiguration(TunnelConfigurationManagerError)
+    case cannotReadTunnelConfiguration(TunnelConfigurationManager.Error)
 
     /// Failure to set network settings
     case setNetworkSettings(Error)
