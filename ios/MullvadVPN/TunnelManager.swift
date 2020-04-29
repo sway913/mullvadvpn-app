@@ -570,7 +570,7 @@ class TunnelManager {
                             }
                             .flatMap { (addresses) in
                                 TunnelConfigurationManager
-                                    .modify(searchTerm: .accountToken(accountToken))
+                                    .update(searchTerm: .accountToken(accountToken))
                                     { (tunnelConfiguration) in
                                         tunnelConfiguration.interface.privateKey = newPrivateKey
                                         tunnelConfiguration.interface.addresses = [
@@ -611,7 +611,7 @@ class TunnelManager {
                 .replaceNil(with: .missingAccount)
                 .flatMap { (accountToken) in
                     TunnelConfigurationManager
-                        .modify(searchTerm: .accountToken(accountToken)) { (tunnelConfig) in
+                        .update(searchTerm: .accountToken(accountToken)) { (tunnelConfig) in
                             tunnelConfig.relayConstraints = constraints
                     }.mapError { TunnelManagerError.setRelayConstraints($0) }
                         .publisher
@@ -801,7 +801,7 @@ class TunnelManager {
                 return tunnels?.first ?? TunnelProviderManagerType()
         }
         .flatMap { (tunnelProvider) in
-            TunnelConfigurationManager.getPersistentKeychainRef(account: accountToken)
+            TunnelConfigurationManager.getPersistentKeychainReference(account: accountToken)
                 .mapError { SetupTunnelError.obtainKeychainRef($0) }
                 .map { (tunnelProvider, $0) }
                 .publisher
@@ -852,7 +852,7 @@ class TunnelManager {
     }
 
     private func updateAssociatedAddresses(accountToken: String, addresses: WireguardAssociatedAddresses) -> Result<(), TunnelConfigurationManager.Error> {
-        TunnelConfigurationManager.modify(searchTerm: .accountToken(accountToken)) { (tunnelConfig) in
+        TunnelConfigurationManager.update(searchTerm: .accountToken(accountToken)) { (tunnelConfig) in
             tunnelConfig.interface.addresses = [
                 addresses.ipv4Address,
                 addresses.ipv6Address
