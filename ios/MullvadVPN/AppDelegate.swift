@@ -29,6 +29,52 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         SimulatorTunnelProvider.shared.delegate = simulatorTunnelProvider
         #endif
 
+//        for i in 0..<2 {
+//            var attributes = Keychain.Attributes()
+//            attributes.class = .genericPassword
+//            attributes.account = "account: \(i)"
+//            attributes.valueData = "secret".data(using: .utf8)!
+//
+//            switch Keychain.add(attributes) {
+//            case .success:
+//                print("Added item")
+//            case .failure(let error):
+//                print("Couldn't add an item: \(error.localizedDescription)")
+//            }
+//        }
+
+        var query3 = Keychain.Attributes()
+        query3.class = .genericPassword
+        query3.account = "account: 0"
+        query3.return = [.attributes]
+        let attrs = try? Keychain.findFirst(query: query3).get()
+
+        var query = Keychain.Attributes()
+        query.class = .genericPassword
+        query.account = "account: 0"
+        query.modificationDate = attrs!.modificationDate!
+
+        var update = Keychain.Attributes()
+        update.valueData = "bruh!".data(using: .utf8)
+
+        switch Keychain.update(query: query, update: update) {
+        case .failure(let error):
+            print("Update error: \(error.localizedDescription)")
+        case .success:
+            print("Success")
+        }
+
+        var query2 = Keychain.Attributes()
+        query2.class = .genericPassword
+        query2.account = "account: 0"
+        query2.return = [.attributes, .data]
+        switch Keychain.findFirst(query: query2) {
+        case .failure(let error):
+            print("Update error: \(error.localizedDescription)")
+        case .success(let itemAttributes):
+            print("Success: \(itemAttributes), data = \(String(bytes: itemAttributes!.valueData!, encoding: .utf8))")
+        }
+
         let accountToken = Account.shared.token
 
         loadTunnelSubscriber = TunnelManager.shared.loadTunnel(accountToken: accountToken)

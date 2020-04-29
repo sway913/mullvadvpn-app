@@ -353,8 +353,26 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     /// Read tunnel configuration from Keychain
     private class func readTunnelConfiguration(keychainReference: Data) -> Result<TunnelConfiguration, PacketTunnelProviderError> {
-        return TunnelConfigurationManager.load(persistentKeychainRef: keychainReference)
+        TunnelConfigurationManager.load(searchTerm: .persistentReference(keychainReference))
             .mapError { PacketTunnelProviderError.cannotReadTunnelConfiguration($0) }
+    }
+
+    private class func checkRotateWireguardKey(tunnelConfiguration: TunnelConfiguration, persistentReference: Data) -> Result<TunnelConfiguration, PacketTunnelProviderError> {
+        let dateComponents = DateComponents()
+        let creationDate = tunnelConfiguration.interface.privateKey.creationDate
+
+        if let keyRotationDate = Calendar.current.date(byAdding: .day, value: 7, to: creationDate) {
+            if keyRotationDate > Date() {
+
+            } else {
+
+            }
+        } else {
+            os_log(.default, log: tunnelProviderLog,
+                   "Failed to compute the key rotation date for Wireguard.")
+        }
+
+        return .success(tunnelConfiguration)
     }
 
     /// Load relay cache with potential networking to refresh the cache and pick the relay for the

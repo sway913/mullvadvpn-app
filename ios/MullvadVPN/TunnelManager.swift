@@ -32,7 +32,7 @@ enum TunnelManagerError: Error {
     case unsetAccount(UnsetAccountError)
 
     /// A failure to set the relay constraints
-    case setRelayConstraints(UpdateTunnelConfigurationError)
+    case setRelayConstraints(TunnelConfigurationManagerError)
 
     /// A failure to get the relay constraints
     case getRelayConstraints(TunnelConfigurationManagerError)
@@ -130,7 +130,7 @@ enum SetAccountError: Error {
     case makeTunnelConfiguration(TunnelConfigurationManagerError)
 
     /// A failure to update the tunnel configuration
-    case updateTunnelConfiguration(UpdateTunnelConfigurationError)
+    case updateTunnelConfiguration(TunnelConfigurationManagerError)
 
     /// A failure to push the wireguard key
     case pushWireguardKey(PushWireguardKeyError)
@@ -155,7 +155,7 @@ enum RegenerateWireguardPrivateKeyError: Error {
     case replaceWireguardKey(PushWireguardKeyError)
 
     /// A failure to update tunnel configuration
-    case updateTunnelConfiguration(UpdateTunnelConfigurationError)
+    case updateTunnelConfiguration(TunnelConfigurationManagerError)
 
     /// A failure to set up a tunnel
     case setupTunnel(SetupTunnelError)
@@ -164,14 +164,6 @@ enum RegenerateWireguardPrivateKeyError: Error {
 enum PushWireguardKeyError: Error {
     case transport(MullvadAPI.Error)
     case server(MullvadAPI.ResponseError)
-}
-
-enum UpdateTunnelConfigurationError: Error {
-    /// Unable to load the existing configuration
-    case loadTunnelConfiguration(TunnelConfigurationManagerError)
-
-    /// Unable to save the configuration
-    case saveTunnelConfiguration(TunnelConfigurationManagerError)
 }
 
 enum StartTunnelError: Error {
@@ -458,7 +450,7 @@ class TunnelManager {
                     let removeKeychainConfigPublisher = Deferred {
                         () -> AnyPublisher<(), UnsetAccountError> in
                         // Load existing configuration
-                        switch TunnelConfigurationManager.load(account: accountToken) {
+                        switch TunnelConfigurationManager.load(searchTerm: .accountToken(accountToken)) {
                         case .success(let tunnelConfig):
                             let publicKey = tunnelConfig.interface
                                 .privateKey
@@ -466,7 +458,7 @@ class TunnelManager {
                                 .rawRepresentation
 
                             // Remove configuration from Keychain
-                            return TunnelConfigurationManager.remove(account: accountToken)
+                            return TunnelConfigurationManager.remove(searchTerm: .accountToken(accountToken))
                                 .mapError { UnsetAccountError.removeTunnelConfiguration($0) }
                                 .publisher
                                 .flatMap {
@@ -558,7 +550,7 @@ class TunnelManager {
                 .flatMap { (accountToken) -> AnyPublisher<(), TunnelManagerError> in
                     let newPrivateKey = WireguardPrivateKey()
 
-                    return TunnelConfigurationManager.load(account: accountToken)
+                    return TunnelConfigurationManager.load(searchTerm: .accountToken(accountToken))
                         .map { $0.interface.privateKey.publicKey }
                         .mapError { RegenerateWireguardPrivateKeyError.readPublicWireguardKey($0) }
                         .publisher
@@ -577,13 +569,14 @@ class TunnelManager {
                                     }
                             }
                             .flatMap { (addresses) in
-                                self.updateTunnelConfiguration(accountToken: accountToken) {
-                                    (tunnelConfiguration) in
-                                    tunnelConfiguration.interface.privateKey = newPrivateKey
-                                    tunnelConfiguration.interface.addresses = [
-                                        addresses.ipv4Address,
-                                        addresses.ipv6Address
-                                    ]
+                                TunnelConfigurationManager
+                                    .modify(searchTerm: .accountToken(accountToken))
+                                    { (tunnelConfiguration) in
+                                        tunnelConfiguration.interface.privateKey = newPrivateKey
+                                        tunnelConfiguration.interface.addresses = [
+                                            addresses.ipv4Address,
+                                            addresses.ipv6Address
+                                        ]
                                 }
                                 .mapError { .updateTunnelConfiguration($0) }
                                 .publisher
@@ -617,7 +610,7 @@ class TunnelManager {
                 .setFailureType(to: TunnelManagerError.self)
                 .replaceNil(with: .missingAccount)
                 .flatMap { (accountToken) in
-                    self.updateTunnelConfiguration(accountToken: accountToken) { (tunnelConfig) in
+                    TunnelConfigurationManager.modify(searchTerm: .accountToken(accountToken)) { (tunnelConfig) in
                         tunnelConfig.relayConstraints = constraints
                     }.mapError { TunnelManagerError.setRelayConstraints($0) }
                         .publisher
@@ -642,7 +635,7 @@ class TunnelManager {
                 .setFailureType(to: TunnelManagerError.self)
                 .replaceNil(with: .missingAccount)
                 .flatMap { (accountToken) in
-                    TunnelConfigurationManager.load(account: accountToken)
+                    TunnelConfigurationManager.load(searchTerm: .accountToken(accountToken))
                         .map { $0.relayConstraints }
                         .flatMapError { (error) -> Result<RelayConstraints, TunnelConfigurationManagerError> in
                             // Return default constraints if the config is not found in Keychain
@@ -662,7 +655,7 @@ class TunnelManager {
                 .setFailureType(to: TunnelManagerError.self)
                 .replaceNil(with: .missingAccount)
                 .flatMap { (accountToken) in
-                    TunnelConfigurationManager.load(account: accountToken)
+                    TunnelConfigurationManager.load(searchTerm: .accountToken(accountToken))
                         .map { $0.interface.privateKey.publicKey }
                         .mapError { TunnelManagerError.getWireguardPublicKey($0) }.publisher
             }
@@ -783,12 +776,14 @@ class TunnelManager {
 
     /// Retrieve the existing TunnelConfiguration or create a new one
     private func makeTunnelConfiguration(accountToken: String) -> Result<TunnelConfiguration, TunnelConfigurationManagerError> {
-        TunnelConfigurationManager.load(account: accountToken)
+        TunnelConfigurationManager.load(searchTerm: .accountToken(accountToken))
             .flatMapError { (error) -> Result<TunnelConfiguration, TunnelConfigurationManagerError> in
                 // Return default tunnel configuration if the config is not found in Keychain
                 if case .getFromKeychain(.itemNotFound) = error {
                     let defaultConfiguration = TunnelConfiguration()
-                    return TunnelConfigurationManager.save(configuration: defaultConfiguration, account: accountToken)
+                    
+                    return TunnelConfigurationManager
+                        .add(configuration: TunnelConfiguration(), account: accountToken)
                         .map { defaultConfiguration }
                 } else {
                     return .failure(error)
@@ -855,21 +850,8 @@ class TunnelManager {
         return protocolConfig
     }
 
-    private func updateTunnelConfiguration(accountToken: String, using block: (inout TunnelConfiguration) -> Void) -> Result<(), UpdateTunnelConfigurationError> {
-        TunnelConfigurationManager.load(account: accountToken)
-            .mapError { UpdateTunnelConfigurationError.loadTunnelConfiguration($0) }
-            .flatMap { (tunnelConfig) -> Result<(), UpdateTunnelConfigurationError> in
-                var tunnelConfig = tunnelConfig
-
-                block(&tunnelConfig)
-
-                return TunnelConfigurationManager.save(configuration: tunnelConfig, account: accountToken)
-                    .mapError { .saveTunnelConfiguration($0) }
-        }
-    }
-
-    private func updateAssociatedAddresses(accountToken: String, addresses: WireguardAssociatedAddresses) -> Result<(), UpdateTunnelConfigurationError> {
-        updateTunnelConfiguration(accountToken: accountToken) { (tunnelConfig) in
+    private func updateAssociatedAddresses(accountToken: String, addresses: WireguardAssociatedAddresses) -> Result<(), TunnelConfigurationManagerError> {
+        TunnelConfigurationManager.modify(searchTerm: .accountToken(accountToken)) { (tunnelConfig) in
             tunnelConfig.interface.addresses = [
                 addresses.ipv4Address,
                 addresses.ipv6Address

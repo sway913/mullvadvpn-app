@@ -24,6 +24,7 @@ extension Keychain {
 
         var `return`: Set<Keychain.Return>?
         var matchLimit: Keychain.MatchLimit?
+        var matchItemList: [Any]?
 
         init() {}
 
@@ -40,6 +41,7 @@ extension Keychain {
 
             `return` = Set(attributes: attributes)
             matchLimit = Keychain.MatchLimit(attributes: attributes)
+            matchItemList = attributes[kSecMatchItemList] as? [Any]
         }
 
         func updateKeychainAttributes(in attributes: inout [CFString: Any]) {
@@ -75,6 +77,10 @@ extension Keychain {
 
             `return`?.updateKeychainAttributes(in: &attributes)
             matchLimit?.updateKeychainAttributes(in: &attributes)
+
+            if let matchItemList = matchItemList {
+                attributes[kSecMatchItemList] = matchItemList
+            }
         }
 
     }

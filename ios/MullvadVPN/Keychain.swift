@@ -99,7 +99,11 @@ extension Keychain {
         returnSet: Set<Keychain.Return>,
         limit: Keychain.MatchLimit) -> [Keychain.Attributes]
     {
-        if returnSet.count == 1, case .data = returnSet.first {
+        switch returnSet {
+        case []:
+            return []
+
+        case [.data]:
             let values: [Data] = unsafelyCastReturnValue(value: value, limit: limit)
 
             return values.map { (data) -> Keychain.Attributes in
@@ -107,7 +111,8 @@ extension Keychain {
                 attributes.valueData = data
                 return attributes
             }
-        } else if returnSet.count == 1, case .persistentReference = returnSet.first {
+
+        case [.persistentReference]:
             let values: [Data] = unsafelyCastReturnValue(value: value, limit: limit)
 
             return values.map { (persistentReference) -> Keychain.Attributes in
@@ -115,13 +120,12 @@ extension Keychain {
                 attributes.valuePersistentReference = persistentReference
                 return attributes
             }
-        } else if returnSet.count > 1 {
+
+        default:
             let rawAttributeList: [[CFString: Any]] =
                 unsafelyCastReturnValue(value: value, limit: limit)
 
             return rawAttributeList.map { Keychain.Attributes(attributes: $0) }
-        } else {
-            return []
         }
     }
 
