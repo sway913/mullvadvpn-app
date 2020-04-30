@@ -11,17 +11,12 @@ import Combine
 
 class WireguardKeyRotation {
 
-    enum PushWireguardKeyError: Swift.Error {
-        case transport(MullvadAPI.Error)
-        case server(MullvadAPI.ResponseError)
-    }
-
     enum Error: Swift.Error {
         /// A failure to read the public Wireguard key from Keychain
         case readPublicWireguardKey(TunnelConfigurationManager.Error)
 
         /// A failure to replace the public Wireguard key
-        case replaceWireguardKey(PushWireguardKeyError)
+        case replaceWireguardKey(MullvadAPI.Error)
 
         /// A failure to update tunnel configuration
         case updateTunnelConfiguration(TunnelConfigurationManager.Error)
@@ -47,26 +42,19 @@ class WireguardKeyRotation {
                     accountToken: keychainEntry.accountToken,
                     oldPublicKey: oldPublicKey.rawRepresentation,
                     newPublicKey: newPrivateKey.publicKey.rawRepresentation)
-                    .mapError { (networkError) -> Error in
-                        return .replaceWireguardKey(.transport(networkError))
-                }.flatMap { (response: MullvadAPI.Response<WireguardAssociatedAddresses>) in
-                    return response.result.publisher
-                        .mapError { (serverError) -> Error in
-                            return .replaceWireguardKey(.server(serverError))
-                    }
-                }
-                .flatMap { (addresses) in
-                    TunnelConfigurationManager
-                        .update(searchTerm: searchTerm)
-                        { (tunnelConfiguration) in
-                            tunnelConfiguration.interface.privateKey = newPrivateKey
-                            tunnelConfiguration.interface.addresses = [
-                                addresses.ipv4Address,
-                                addresses.ipv6Address
-                            ]
-                    }
-                    .mapError { .updateTunnelConfiguration($0) }
-                    .publisher
+                    .mapError {  .replaceWireguardKey($0) }
+                    .flatMap { (addresses) in
+                        TunnelConfigurationManager
+                            .update(searchTerm: searchTerm)
+                            { (tunnelConfiguration) in
+                                tunnelConfiguration.interface.privateKey = newPrivateKey
+                                tunnelConfiguration.interface.addresses = [
+                                    addresses.ipv4Address,
+                                    addresses.ipv6Address
+                                ]
+                        }
+                        .mapError { .updateTunnelConfiguration($0) }
+                        .publisher
                 }.eraseToAnyPublisher()
         }.eraseToAnyPublisher()
     }

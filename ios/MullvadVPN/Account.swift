@@ -26,14 +26,12 @@ enum AccountError: Error {
 
 /// A enum describing the error emitted during login
 enum AccountLoginError: Error {
-    case network(MullvadAPI.Error)
-    case communication(MullvadAPI.ResponseError)
+    case rpc(MullvadAPI.Error)
     case tunnelConfiguration(TunnelManagerError)
 }
 
 enum CreateAccountError: Error {
-    case network(MullvadAPI.Error)
-    case communication(MullvadAPI.ResponseError)
+    case rpc(MullvadAPI.Error)
     case tunnelConfiguration(TunnelManagerError)
 }
 
@@ -53,22 +51,22 @@ extension AccountError: LocalizedError {
 
     var failureReason: String? {
         switch self {
-        case .createNew(.network), .createNew(.communication):
+        case .createNew(.rpc):
             return NSLocalizedString("Failed to create new account", comment: "")
 
-        case .login(.communication(let serverError)) where serverError.code == .accountDoesNotExist:
+        case .login(.rpc(.server(let serverError))) where serverError.code == .accountDoesNotExist:
             return NSLocalizedString("Invalid account", comment: "")
 
-        case .login(.network):
+        case .login(.rpc(.network)):
             return NSLocalizedString("Network error", comment: "")
 
-        case .login(.communication):
+        case .login(.rpc(.server)):
             return NSLocalizedString("Server error", comment: "")
 
         case .login(.tunnelConfiguration(.setAccount(let setAccountError))),
              .createNew(.tunnelConfiguration(.setAccount(let setAccountError))):
             switch setAccountError {
-            case .pushWireguardKey(.transport(.network)):
+            case .pushWireguardKey(.network):
                 return NSLocalizedString("Network error", comment: "")
 
             case .pushWireguardKey(.server(let serverError)):
@@ -140,16 +138,11 @@ class Account {
 
     func loginWithNewAccount() -> AnyPublisher<String, AccountError> {
         return apiClient.createAccount()
-            .mapError { CreateAccountError.network($0) }
-            .flatMap { (response) -> AnyPublisher<(String, Date), CreateAccountError> in
-                response.result
-                    .mapError { CreateAccountError.communication($0) }
-                    .publisher
-                    .flatMap { (accountToken) in
-                        TunnelManager.shared.setAccount(accountToken: accountToken)
-                            .mapError { CreateAccountError.tunnelConfiguration($0) }
-                            .map { (accountToken, Date()) }
-                }.eraseToAnyPublisher()
+            .mapError { CreateAccountError.rpc($0) }
+            .flatMap { (newAccountToken) in
+                TunnelManager.shared.setAccount(accountToken: newAccountToken)
+                    .mapError { CreateAccountError.tunnelConfiguration($0) }
+                    .map { (newAccountToken, Date()) }
         }.mapError { AccountError.createNew($0) }
             .receive(on: DispatchQueue.main)
             .map { (accountToken, expiry) -> String in
@@ -163,17 +156,15 @@ class Account {
     /// application preferences.
     func login(with accountToken: String) -> AnyPublisher<(), AccountError> {
         return apiClient.getAccountExpiry(accountToken: accountToken)
-            .mapError { AccountLoginError.network($0) }
-            .flatMap { (response) in
-                response.result
-                    .mapError { AccountLoginError.communication($0) }
-                    .publisher
-        }.flatMap { (expiry) in
-            TunnelManager.shared.setAccount(accountToken: accountToken)
-                .mapError { AccountLoginError.tunnelConfiguration($0) }
-                .map { expiry }
-        }.mapError { AccountError.login($0) }.receive(on: DispatchQueue.main).map { (expiry) in
-            self.saveAccountToPreferences(accountToken: accountToken, expiry: expiry)
+            .mapError { AccountLoginError.rpc($0) }
+            .flatMap { (expiry) in
+                TunnelManager.shared.setAccount(accountToken: accountToken)
+                    .mapError { AccountLoginError.tunnelConfiguration($0) }
+                    .map { expiry }
+        }.mapError { AccountError.login($0) }
+            .receive(on: DispatchQueue.main)
+            .map { (expiry) in
+                self.saveAccountToPreferences(accountToken: accountToken, expiry: expiry)
         }.eraseToAnyPublisher()
     }
 

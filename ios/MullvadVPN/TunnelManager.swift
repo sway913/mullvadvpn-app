@@ -71,21 +71,10 @@ extension TunnelManagerError: LocalizedError {
     var failureReason: String? {
         switch self {
 
-        case .setAccount(.pushWireguardKey(let pushError)):
+        case .setAccount(.pushWireguardKey(let pushError)),
+             .regenerateWireguardPrivateKey(.keyRotation(.replaceWireguardKey(let pushError))):
             switch pushError {
-            case .transport(.network(let urlError)):
-                return urlError.localizedDescription
-
-            case .server(let serverError):
-                return serverError.errorDescription
-
-            default:
-                return NSLocalizedString("Internal error", comment: "")
-            }
-
-        case .regenerateWireguardPrivateKey(.keyRotation(.replaceWireguardKey(let pushError))):
-            switch pushError {
-            case .transport(.network(let urlError)):
+            case .network(let urlError):
                 return urlError.localizedDescription
 
             case .server(let serverError):
@@ -144,7 +133,7 @@ enum SetAccountError: Error {
     case updateTunnelConfiguration(TunnelConfigurationManager.Error)
 
     /// A failure to push the wireguard key
-    case pushWireguardKey(PushWireguardKeyError)
+    case pushWireguardKey(MullvadAPI.Error)
 
     /// A failure to set up a tunnel
     case setup(SetupTunnelError)
@@ -164,11 +153,6 @@ enum RegenerateWireguardPrivateKeyError: Error {
 
     /// A failure to set up a tunnel
     case setupTunnel(SetupTunnelError)
-}
-
-enum PushWireguardKeyError: Error {
-    case transport(MullvadAPI.Error)
-    case server(MullvadAPI.ResponseError)
 }
 
 enum StartTunnelError: Error {
@@ -425,20 +409,15 @@ class TunnelManager {
                     let publicKey = tunnelConfig.interface.privateKey.publicKey.rawRepresentation
 
                     return self.apiClient.pushWireguardKey(accountToken: accountToken, publicKey: publicKey)
-                        .mapError { (networkError) -> SetAccountError in
-                            return .pushWireguardKey(.transport(networkError))
-                    }.flatMap { (response: MullvadAPI.Response<WireguardAssociatedAddresses>) in
-                        return response.result.publisher
-                            .mapError { (serverError) -> SetAccountError in
-                                return .pushWireguardKey(.server(serverError))
-                        }
-                    }.flatMap { (addresses) in
-                        return self.updateAssociatedAddresses(
-                            accountToken: accountToken,
-                            addresses: addresses
-                        ).mapError { SetAccountError.updateTunnelConfiguration($0) }
-                            .publisher
-                    }.flatMap { setupTunnelPublisher }.eraseToAnyPublisher()
+                        .mapError { SetAccountError.pushWireguardKey($0) }
+                        .flatMap { (addresses) in
+                            self.updateAssociatedAddresses(
+                                accountToken: accountToken,
+                                addresses: addresses
+                            ).mapError { SetAccountError.updateTunnelConfiguration($0) }
+                                .publisher
+                                .flatMap { setupTunnelPublisher }
+                    }.eraseToAnyPublisher()
             }.mapError { TunnelManagerError.setAccount($0) }
         }.eraseToAnyPublisher()
     }
@@ -474,19 +453,11 @@ class TunnelManager {
                                         publicKey: publicKey
                                     )
                                         .retry(1)
-                                        .map({ (response) -> () in
-                                            switch response.result {
-                                            case .success(let isRemoved):
-                                                os_log(.debug, "Removed the WireGuard key from server: %{public}s", "\(isRemoved)")
-
-                                            case .failure(let error):
-                                                os_log(.error, "Failed to remove the WireGuard key from server. Server error: %{public}s", error.localizedDescription)
-                                            }
-
-                                            // Suppress server errors
+                                        .map({ (isRemoved) -> () in
+                                            os_log(.debug, "Removed the WireGuard key from server: %{public}s", "\(isRemoved)")
                                             return ()
                                         }).catch({ (error) -> Result<(), UnsetAccountError>.Publisher in
-                                            os_log(.error, "Failed to remove the Wireguard key from server. Network error: %{public}s", error.localizedDescription)
+                                            os_log(.error, "Failed to remove the Wireguard key from server: %{public}s", error.localizedDescription)
 
                                             // Suppress network errors
                                             return Result.Publisher(())

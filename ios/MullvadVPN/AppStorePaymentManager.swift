@@ -85,8 +85,7 @@ class AppStorePaymentManager {
 
     enum SendAppStoreReceiptError: Swift.Error {
         case read(AppStoreReceipt.Error)
-        case network(MullvadAPI.Error)
-        case server(MullvadAPI.ResponseError)
+        case rpc(MullvadAPI.Error)
     }
 
     enum Error: Swift.Error {
@@ -223,11 +222,10 @@ class AppStorePaymentManager {
         return AppStoreReceipt.fetch(forceRefresh: forceRefresh)
             .mapError { SendAppStoreReceiptError.read($0) }
             .flatMap { (receiptData) in
-                self.apiClient.sendAppStoreReceipt(accountToken: accountToken, receiptData: receiptData)
-                    .mapError { SendAppStoreReceiptError.network($0) }
-                    .flatMap({ (response) in
-                        response.result.mapError { SendAppStoreReceiptError.server($0) }.publisher
-                    })
+                self.apiClient.sendAppStoreReceipt(
+                    accountToken: accountToken,
+                    receiptData: receiptData
+                ).mapError { SendAppStoreReceiptError.rpc($0) }
         }
         .receive(on: DispatchQueue.main)
         .handleEvents(receiveOutput: { (response) in
@@ -345,9 +343,9 @@ extension AppStorePaymentManager.Error: LocalizedError {
         switch self {
         case .storePayment(let storeError):
             return storeError.localizedDescription
-        case .sendReceipt(.network(let urlError)):
+        case .sendReceipt(.rpc(.network(let urlError))):
             return urlError.localizedDescription
-        case .sendReceipt(.server(let serverError)):
+        case .sendReceipt(.rpc(.server(let serverError))):
             return serverError.errorDescription
         case .sendReceipt(.read(.refresh(let storeError))):
             return storeError.localizedDescription
