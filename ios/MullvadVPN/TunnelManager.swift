@@ -71,8 +71,19 @@ extension TunnelManagerError: LocalizedError {
     var failureReason: String? {
         switch self {
 
-        case .setAccount(.pushWireguardKey(let pushError)),
-             .regenerateWireguardPrivateKey(.replaceWireguardKey(let pushError)):
+        case .setAccount(.pushWireguardKey(let pushError)):
+            switch pushError {
+            case .transport(.network(let urlError)):
+                return urlError.localizedDescription
+
+            case .server(let serverError):
+                return serverError.errorDescription
+
+            default:
+                return NSLocalizedString("Internal error", comment: "")
+            }
+
+        case .regenerateWireguardPrivateKey(.keyRotation(.replaceWireguardKey(let pushError))):
             switch pushError {
             case .transport(.network(let urlError)):
                 return urlError.localizedDescription
@@ -91,7 +102,7 @@ extension TunnelManagerError: LocalizedError {
 
     var recoverySuggestion: String? {
         switch self {
-        case .regenerateWireguardPrivateKey(.replaceWireguardKey(let pushError)):
+        case .regenerateWireguardPrivateKey(.keyRotation(.replaceWireguardKey(let pushError))):
             switch pushError {
             case .server(let serverError) where serverError.code == .tooManyWireguardKeys:
                 return NSLocalizedString("Remove unused WireGuard keys and try again.", comment: "")
@@ -148,14 +159,8 @@ enum UnsetAccountError: Error {
 }
 
 enum RegenerateWireguardPrivateKeyError: Error {
-    /// A failure to read the public Wireguard key from Keychain
-    case readPublicWireguardKey(TunnelConfigurationManager.Error)
-
-    /// A failure to replace the public Wireguard key
-    case replaceWireguardKey(PushWireguardKeyError)
-
-    /// A failure to update tunnel configuration
-    case updateTunnelConfiguration(TunnelConfigurationManager.Error)
+    /// A failure to rotate the Wireguard key
+    case keyRotation(WireguardKeyRotation.Error)
 
     /// A failure to set up a tunnel
     case setupTunnel(SetupTunnelError)
@@ -451,8 +456,9 @@ class TunnelManager {
                         () -> AnyPublisher<(), UnsetAccountError> in
                         // Load existing configuration
                         switch TunnelConfigurationManager.load(searchTerm: .accountToken(accountToken)) {
-                        case .success(let tunnelConfig):
-                            let publicKey = tunnelConfig.interface
+                        case .success(let keychainEntry):
+                            let publicKey = keychainEntry.tunnelConfiguration
+                                .interface
                                 .privateKey
                                 .publicKey
                                 .rawRepresentation
@@ -547,59 +553,10 @@ class TunnelManager {
             Just(self.accountToken)
                 .setFailureType(to: TunnelManagerError.self)
                 .replaceNil(with: .missingAccount)
-                .flatMap { (accountToken) -> AnyPublisher<(), TunnelManagerError> in
-                    let newPrivateKey = WireguardPrivateKey()
-
-                    return TunnelConfigurationManager.load(searchTerm: .accountToken(accountToken))
-                        .map { $0.interface.privateKey.publicKey }
-                        .mapError { RegenerateWireguardPrivateKeyError.readPublicWireguardKey($0) }
-                        .publisher
-                        .flatMap { (oldPublicKey) in
-                            self.apiClient.replaceWireguardKey(
-                                accountToken: accountToken,
-                                oldPublicKey: oldPublicKey.rawRepresentation,
-                                newPublicKey: newPrivateKey.publicKey.rawRepresentation)
-                                .mapError { (networkError) -> RegenerateWireguardPrivateKeyError in
-                                    return .replaceWireguardKey(.transport(networkError))
-                            }.receive(on: self.executionQueue)
-                                .flatMap { (response: MullvadAPI.Response<WireguardAssociatedAddresses>) in
-                                    return response.result.publisher
-                                        .mapError { (serverError) -> RegenerateWireguardPrivateKeyError in
-                                            return .replaceWireguardKey(.server(serverError))
-                                    }
-                            }
-                            .flatMap { (addresses) in
-                                TunnelConfigurationManager
-                                    .update(searchTerm: .accountToken(accountToken))
-                                    { (tunnelConfiguration) in
-                                        tunnelConfiguration.interface.privateKey = newPrivateKey
-                                        tunnelConfiguration.interface.addresses = [
-                                            addresses.ipv4Address,
-                                            addresses.ipv6Address
-                                        ]
-                                }
-                                .mapError { .updateTunnelConfiguration($0) }
-                                .publisher
-                            }
-                            .flatMap {
-                                self.setupTunnel(accountToken: accountToken)
-                                    .map { _ in () }
-                                    .mapError { RegenerateWireguardPrivateKeyError.setupTunnel($0) }
-                            }.receive(on: self.executionQueue)
-                                .flatMap { _ in
-                                    // Ignore Packet Tunnel IPC errors but log them
-                                    self.reloadPacketTunnelConfiguration()
-                                        .replaceError(with: ())
-                                        .setFailureType(to: RegenerateWireguardPrivateKeyError.self)
-                                        .handleEvents(receiveCompletion: { (completion) in
-                                            if case .failure(let error) = completion {
-                                                os_log(.error, "Failed to tell the tunnel to reload configuration: %{public}s", error.localizedDescription)
-                                            }
-                                        })
-                            }
-                    }
-                    .mapError { TunnelManagerError.regenerateWireguardPrivateKey($0) }
-                    .eraseToAnyPublisher()
+                .flatMap { (accountToken) in
+                    WireguardKeyRotation(apiClient: self.apiClient)
+                        .rotatePrivateKey(searchTerm: .accountToken(accountToken))
+                        .mapError { .regenerateWireguardPrivateKey(.keyRotation($0)) }
             }
         }.eraseToAnyPublisher()
     }
@@ -637,7 +594,7 @@ class TunnelManager {
                 .replaceNil(with: .missingAccount)
                 .flatMap { (accountToken) in
                     TunnelConfigurationManager.load(searchTerm: .accountToken(accountToken))
-                        .map { $0.relayConstraints }
+                        .map { $0.tunnelConfiguration.relayConstraints }
                         .flatMapError { (error) -> Result<RelayConstraints, TunnelConfigurationManager.Error> in
                             // Return default constraints if the config is not found in Keychain
                             if case .getFromKeychain(.itemNotFound) = error {
@@ -657,7 +614,7 @@ class TunnelManager {
                 .replaceNil(with: .missingAccount)
                 .flatMap { (accountToken) in
                     TunnelConfigurationManager.load(searchTerm: .accountToken(accountToken))
-                        .map { $0.interface.privateKey.publicKey }
+                        .map { $0.tunnelConfiguration.interface.privateKey.publicKey }
                         .mapError { TunnelManagerError.getWireguardPublicKey($0) }.publisher
             }
         }.eraseToAnyPublisher()
@@ -778,6 +735,7 @@ class TunnelManager {
     /// Retrieve the existing TunnelConfiguration or create a new one
     private func makeTunnelConfiguration(accountToken: String) -> Result<TunnelConfiguration, TunnelConfigurationManager.Error> {
         TunnelConfigurationManager.load(searchTerm: .accountToken(accountToken))
+            .map { $0.tunnelConfiguration }
             .flatMapError { (error) -> Result<TunnelConfiguration, TunnelConfigurationManager.Error> in
                 // Return default tunnel configuration if the config is not found in Keychain
                 if case .getFromKeychain(.itemNotFound) = error {

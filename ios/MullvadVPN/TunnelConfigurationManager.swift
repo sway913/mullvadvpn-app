@@ -42,15 +42,25 @@ extension TunnelConfigurationManager {
         }
     }
 
-    static func load(searchTerm: SearchTerm) -> Result<TunnelConfiguration> {
+    struct KeychainEntry {
+        let accountToken: String
+        let tunnelConfiguration: TunnelConfiguration
+    }
+
+    static func load(searchTerm: SearchTerm) -> Result<KeychainEntry> {
         var query = makeKeychainAttributes()
-        query.return = [.data]
+        query.return = [.data, .attributes]
         searchTerm.apply(to: &query)
 
         return Keychain.findFirst(query: query)
             .mapError { .getFromKeychain($0) }
             .flatMap { (attributes) in
-                return Self.decode(data: attributes!.valueData!)
+                let attributes = attributes!
+                let account = attributes.account!
+                let data = attributes.valueData!
+
+                return Self.decode(data: data)
+                    .map { KeychainEntry(accountToken: account, tunnelConfiguration: $0) }
         }
     }
 
