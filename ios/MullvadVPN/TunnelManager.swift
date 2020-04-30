@@ -133,7 +133,7 @@ enum SetAccountError: Error {
     case updateTunnelConfiguration(TunnelConfigurationManager.Error)
 
     /// A failure to push the wireguard key
-    case pushWireguardKey(MullvadAPI.Error)
+    case pushWireguardKey(MullvadRpc.Error)
 
     /// A failure to set up a tunnel
     case setup(SetupTunnelError)
@@ -287,7 +287,7 @@ class TunnelManager {
     /// A queue used for access synchronization to the TunnelManager members
     private let executionQueue = DispatchQueue(label: "net.mullvad.vpn.tunnel-manager.execution-queue")
 
-    private let apiClient = MullvadAPI()
+    private let apiClient = MullvadRpc()
     private var tunnelProvider: TunnelProviderManagerType?
     private var tunnelIpc: PacketTunnelIpc?
 

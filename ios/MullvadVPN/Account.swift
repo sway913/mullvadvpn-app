@@ -26,12 +26,12 @@ enum AccountError: Error {
 
 /// A enum describing the error emitted during login
 enum AccountLoginError: Error {
-    case rpc(MullvadAPI.Error)
+    case rpc(MullvadRpc.Error)
     case tunnelConfiguration(TunnelManagerError)
 }
 
 enum CreateAccountError: Error {
-    case rpc(MullvadAPI.Error)
+    case rpc(MullvadRpc.Error)
     case tunnelConfiguration(TunnelManagerError)
 }
 
@@ -106,7 +106,7 @@ class Account {
     static let newAccountExpiryUserInfoKey = "newAccountExpiry"
 
     static let shared = Account()
-    private let apiClient = MullvadAPI()
+    private let rpc = MullvadRpc()
 
     /// Returns true if user agreed to terms of service, otherwise false
     var isAgreedToTermsOfService: Bool {
@@ -137,7 +137,7 @@ class Account {
     }
 
     func loginWithNewAccount() -> AnyPublisher<String, AccountError> {
-        return apiClient.createAccount()
+        return rpc.createAccount()
             .mapError { CreateAccountError.rpc($0) }
             .flatMap { (newAccountToken) in
                 TunnelManager.shared.setAccount(accountToken: newAccountToken)
@@ -155,7 +155,7 @@ class Account {
     /// Perform the login and save the account token along with expiry (if available) to the
     /// application preferences.
     func login(with accountToken: String) -> AnyPublisher<(), AccountError> {
-        return apiClient.getAccountExpiry(accountToken: accountToken)
+        return rpc.getAccountExpiry(accountToken: accountToken)
             .mapError { AccountLoginError.rpc($0) }
             .flatMap { (expiry) in
                 TunnelManager.shared.setAccount(accountToken: accountToken)

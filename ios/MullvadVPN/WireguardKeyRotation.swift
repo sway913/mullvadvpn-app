@@ -16,15 +16,15 @@ class WireguardKeyRotation {
         case readPublicWireguardKey(TunnelConfigurationManager.Error)
 
         /// A failure to replace the public Wireguard key
-        case replaceWireguardKey(MullvadAPI.Error)
+        case replaceWireguardKey(MullvadRpc.Error)
 
         /// A failure to update tunnel configuration
         case updateTunnelConfiguration(TunnelConfigurationManager.Error)
     }
 
-    private let apiClient: MullvadAPI
+    private let apiClient: MullvadRpc
 
-    init(apiClient: MullvadAPI) {
+    init(apiClient: MullvadRpc) {
         self.apiClient = apiClient
     }
 

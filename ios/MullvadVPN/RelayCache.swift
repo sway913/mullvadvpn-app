@@ -15,7 +15,7 @@ enum RelayCacheError: Error {
     case defaultLocationNotFound
     case io(Error)
     case coding(Error)
-    case rpc(MullvadAPI.Error)
+    case rpc(MullvadRpc.Error)
 }
 
 /// A enum describing the source of the relay list
@@ -30,7 +30,7 @@ enum RelayListSource {
 class RelayCache {
 
     /// Mullvad API client
-    private let apiClient: MullvadAPI
+    private let apiClient: MullvadRpc
 
     /// The cache location used by the class instance
     private let cacheFileURL: URL
@@ -50,7 +50,7 @@ class RelayCache {
     }
 
     init(cacheFileURL: URL, networkSession: URLSession = URLSession.shared) {
-        apiClient = MullvadAPI(session: networkSession)
+        apiClient = MullvadRpc(session: networkSession)
         self.cacheFileURL = cacheFileURL
     }
 

@@ -85,7 +85,7 @@ class AppStorePaymentManager {
 
     enum SendAppStoreReceiptError: Swift.Error {
         case read(AppStoreReceipt.Error)
-        case rpc(MullvadAPI.Error)
+        case rpc(MullvadRpc.Error)
     }
 
     enum Error: Swift.Error {
@@ -98,7 +98,7 @@ class AppStorePaymentManager {
     static let shared = AppStorePaymentManager(queue: SKPaymentQueue.default())
 
     private let queue: SKPaymentQueue
-    private let apiClient = MullvadAPI()
+    private let rpc = MullvadRpc()
 
     private var paymentQueueSubscriber: AnyCancellable?
     private var sendReceiptSubscriber: AnyCancellable?
@@ -222,7 +222,7 @@ class AppStorePaymentManager {
         return AppStoreReceipt.fetch(forceRefresh: forceRefresh)
             .mapError { SendAppStoreReceiptError.read($0) }
             .flatMap { (receiptData) in
-                self.apiClient.sendAppStoreReceipt(
+                self.rpc.sendAppStoreReceipt(
                     accountToken: accountToken,
                     receiptData: receiptData
                 ).mapError { SendAppStoreReceiptError.rpc($0) }
