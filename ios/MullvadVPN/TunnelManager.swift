@@ -287,7 +287,7 @@ class TunnelManager {
     /// A queue used for access synchronization to the TunnelManager members
     private let executionQueue = DispatchQueue(label: "net.mullvad.vpn.tunnel-manager.execution-queue")
 
-    private let apiClient = MullvadRpc()
+    private let rpc = MullvadRpc()
     private var tunnelProvider: TunnelProviderManagerType?
     private var tunnelIpc: PacketTunnelIpc?
 
@@ -408,7 +408,7 @@ class TunnelManager {
                     // Send wireguard key to the server
                     let publicKey = tunnelConfig.interface.privateKey.publicKey.rawRepresentation
 
-                    return self.apiClient.pushWireguardKey(accountToken: accountToken, publicKey: publicKey)
+                    return self.rpc.pushWireguardKey(accountToken: accountToken, publicKey: publicKey)
                         .mapError { SetAccountError.pushWireguardKey($0) }
                         .flatMap { (addresses) in
                             self.updateAssociatedAddresses(
@@ -448,7 +448,7 @@ class TunnelManager {
                                 .publisher
                                 .flatMap {
                                     // Remove WireGuard key from master
-                                    self.apiClient.removeWireguardKey(
+                                    self.rpc.removeWireguardKey(
                                         accountToken: accountToken,
                                         publicKey: publicKey
                                     )
@@ -525,7 +525,7 @@ class TunnelManager {
                 .setFailureType(to: TunnelManagerError.self)
                 .replaceNil(with: .missingAccount)
                 .flatMap { (accountToken) in
-                    WireguardKeyRotation(apiClient: self.apiClient)
+                    WireguardKeyRotation(apiClient: self.rpc)
                         .rotatePrivateKey(searchTerm: .accountToken(accountToken))
                         .mapError { .regenerateWireguardPrivateKey(.keyRotation($0)) }
             }
@@ -713,7 +713,7 @@ class TunnelManager {
                     let defaultConfiguration = TunnelConfiguration()
 
                     return TunnelConfigurationManager
-                        .add(configuration: TunnelConfiguration(), account: accountToken)
+                        .add(configuration: defaultConfiguration, account: accountToken)
                         .map { defaultConfiguration }
                 } else {
                     return .failure(error)

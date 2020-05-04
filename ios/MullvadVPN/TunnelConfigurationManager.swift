@@ -142,7 +142,7 @@ extension TunnelConfigurationManager {
         return Keychain.findFirst(query: query)
             .mapError { .getPersistentKeychainRef($0) }
             .map { (attributes) -> Data in
-                return attributes!.valueData!
+                return attributes!.valuePersistentReference!
         }
     }
 
