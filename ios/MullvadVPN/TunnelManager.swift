@@ -526,8 +526,11 @@ class TunnelManager {
                 .replaceNil(with: .missingAccount)
                 .flatMap { (accountToken) in
                     WireguardKeyRotation(apiClient: self.rpc)
-                        .rotatePrivateKey(searchTerm: .accountToken(accountToken))
+                        .rotatePrivateKey(
+                            searchTerm: .accountToken(accountToken),
+                            precondition: .always)
                         .mapError { .regenerateWireguardPrivateKey(.keyRotation($0)) }
+                        .map { _ in () }
             }
         }.eraseToAnyPublisher()
     }
