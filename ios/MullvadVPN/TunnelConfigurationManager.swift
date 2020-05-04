@@ -28,7 +28,7 @@ extension TunnelConfigurationManager {
 
     typealias Result<T> = Swift.Result<T, Error>
 
-    enum SearchTerm {
+    enum KeychainSearchTerm {
         case accountToken(String)
         case persistentReference(Data)
 
@@ -47,7 +47,7 @@ extension TunnelConfigurationManager {
         let tunnelConfiguration: TunnelConfiguration
     }
 
-    static func load(searchTerm: SearchTerm) -> Result<KeychainEntry> {
+    static func load(searchTerm: KeychainSearchTerm) -> Result<KeychainEntry> {
         var query = makeKeychainAttributes()
         query.return = [.data, .attributes]
         searchTerm.apply(to: &query)
@@ -79,7 +79,7 @@ extension TunnelConfigurationManager {
         }
     }
 
-    static func remove(searchTerm: SearchTerm) -> Result<()> {
+    static func remove(searchTerm: KeychainSearchTerm) -> Result<()> {
         var query = makeKeychainAttributes()
         searchTerm.apply(to: &query)
 
@@ -87,7 +87,7 @@ extension TunnelConfigurationManager {
             .mapError { .removeKeychainItem($0) }
     }
 
-    static func update(searchTerm: SearchTerm, using changeConfiguration: (inout TunnelConfiguration) -> Void) -> Result<()> {
+    static func update(searchTerm: KeychainSearchTerm, using changeConfiguration: (inout TunnelConfiguration) -> Void) -> Result<()> {
         var searchQuery = makeKeychainAttributes()
         searchQuery.return = [.attributes, .data]
         searchTerm.apply(to: &searchQuery)

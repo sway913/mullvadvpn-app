@@ -28,7 +28,7 @@ class WireguardKeyRotation {
         self.apiClient = apiClient
     }
 
-    func rotatePrivateKey(searchTerm: TunnelConfigurationManager.SearchTerm) -> AnyPublisher<(), Error> {
+    func rotatePrivateKey(searchTerm: TunnelConfigurationManager.KeychainSearchTerm) -> AnyPublisher<(), Error> {
         let newPrivateKey = WireguardPrivateKey()
 
         return TunnelConfigurationManager.load(searchTerm: searchTerm)
