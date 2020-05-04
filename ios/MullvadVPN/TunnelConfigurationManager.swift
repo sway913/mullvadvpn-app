@@ -17,8 +17,8 @@ enum TunnelConfigurationManager {}
 extension TunnelConfigurationManager {
 
     enum Error: Swift.Error {
-        case encode(TunnelConfigurationCoder.Error)
-        case decode(TunnelConfigurationCoder.Error)
+        case encode(Swift.Error)
+        case decode(Swift.Error)
         case addToKeychain(Keychain.Error)
         case updateKeychain(Keychain.Error)
         case removeKeychainItem(Keychain.Error)
@@ -155,12 +155,12 @@ extension TunnelConfigurationManager {
     }
 
     private static func encode(tunnelConfig: TunnelConfiguration) -> Result<Data> {
-        TunnelConfigurationCoder.encode(tunnelConfig: tunnelConfig)
-            .mapError { TunnelConfigurationManager.Error.encode($0) }
+        return Swift.Result { try JSONEncoder().encode(tunnelConfig) }
+            .mapError { .encode($0) }
     }
 
     private static func decode(data: Data) -> Result<TunnelConfiguration> {
-        TunnelConfigurationCoder.decode(data: data)
-            .mapError { TunnelConfigurationManager.Error.decode($0) }
+        return Swift.Result { try JSONDecoder().decode(TunnelConfiguration.self, from: data) }
+            .mapError { .decode($0) }
     }
 }
