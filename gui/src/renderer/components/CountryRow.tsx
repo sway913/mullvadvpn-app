@@ -98,6 +98,7 @@ export default class CountryRow extends Component<IProps> {
   }
 
   private toggleCollapse = (event: Types.SyntheticEvent) => {
+    alert('Expand');
     if (this.props.onExpand) {
       this.props.onExpand(this.props.location, !this.props.expanded);
     }
@@ -105,6 +106,7 @@ export default class CountryRow extends Component<IProps> {
   };
 
   private handlePress = () => {
+    alert('Select');
     if (this.props.onSelect) {
       this.props.onSelect(this.props.location);
     }
